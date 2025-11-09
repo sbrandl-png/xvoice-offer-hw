@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,14 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Check, Download, Mail, ShoppingCart, Copy, Eye, Trash2 } from "lucide-react";
 
 /**
- * XVOICE OFFER BUILDER – Next.js App Router (Client Component)
- * - Per-Item-Rabatte mit Caps (Monatlich: XVPR/XVDV/XVMO 40%, XVTE 20%, XVCRM 20%, XVF2M 100%, XVPS 0)
- * - XVPS-Menge = XVPR + XVDV + XVMO (read-only)
- * - Setup-Pauschale (einmalig) abhängig von Anzahl Kernlizenzen (XVPR+XVDV+XVMO), aus CSV (optional) oder Fallback
- * - Hardware (einmalig) aus CSV (optional) oder Fallback, max. 10% Rabatt
- * - Angebots-HTML: klare Trennung monatlich vs. einmalig, Listen- vs. Angebotspreis, orange Trennlinie über CEO-Block
- * - Gleich breite Eingabefelder für Menge & Rabatt
- * - Stabile Preview/Download/Copy
+ * XVOICE HARDWARE OFFER BUILDER – Hardware-only
+ * - Nur einmalige Positionen (Hardware)
+ * - Rabatt je Position (Default Cap 10%) – gleich breite Inputs für Menge & Rabatt
+ * - Angebots-HTML mit Listen- vs. Angebotspreis und klaren Summenzeilen (rechtsbündig)
+ * - Stabile Preview, Download, Copy, optionaler Versand über /api/send-offer
  */
 
 // ===== BRAND / COMPANY =====
@@ -45,18 +42,10 @@ type CatalogItem = {
   sku: string;
   name: string;
   price: number; // Listenpreis netto
-  unit?: string; // "/Monat" | "Stück" | ...
+  unit?: string; // "Stück" | "Set" | ...
   desc?: string;
-  billing: "monthly" | "one-time";
-  maxDiscountPct?: number; // Cap je Position
-};
-
-type SetupTier = {
-  minLicenses: number;
-  maxLicenses: number; // inkl.; letzte Stufe Infinity
-  sku: string;
-  name: string;
-  price: number; // einmalig netto
+  billing: "one-time";
+  maxDiscountPct?: number; // Cap je Position (Standard 10)
 };
 
 type Customer = {
@@ -70,142 +59,77 @@ type Customer = {
   city: string;
   notes: string;
 };
+
 type Salesperson = {
   name: string;
   email: string;
   phone: string;
 };
 
-// ===== MONATLICHER KATALOG =====
-const MONTHLY: CatalogItem[] = [
-  {
-    sku: "XVPR",
-    name: "xVoice UC Premium",
-    price: 8.95,
-    unit: "/Monat",
-    billing: "monthly",
-    desc:
-      "Voller Leistungsumfang inkl. Softphone & Smartphone, beliebige Hardphones, Teams Add-In, ACD, Warteschleifen, Callcenter, Fax2Mail.",
-    maxDiscountPct: 40,
-  },
-  {
-    sku: "XVDV",
-    name: "xVoice UC Device Only",
-    price: 3.85,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "Lizenz für analoge Faxe, Türsprechstellen, Räume oder reine Tischtelefon-Nutzer.",
-    maxDiscountPct: 40,
-  },
-  {
-    sku: "XVMO",
-    name: "xVoice UC Smartphone Only",
-    price: 5.70,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "Premium-Funktionsumfang, beschränkt auf mobile Nutzung (iOS/Android/macOS).",
-    maxDiscountPct: 40,
-  },
-  {
-    sku: "XVTE",
-    name: "xVoice UC Teams Integration",
-    price: 4.75,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "Native MS Teams Integration (Phone Standard Lizenz von Microsoft erforderlich).",
-    maxDiscountPct: 20,
-  },
-  {
-    sku: "XVPS",
-    name: "xVoice UC Premium Service 4h SLA (je Lizenz)",
-    price: 1.35,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "4h Reaktionszeit inkl. bevorzugtem Hardwaretausch & Konfigurationsänderungen.",
-    maxDiscountPct: 0, // kein Rabatt
-  },
-  {
-    sku: "XVCRM",
-    name: "xVoice UC Software Integration Lizenz",
-    price: 5.95,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "Nahtlose Integration in CRM/Helpdesk (Salesforce, HubSpot, Zendesk, Dynamics u.a.).",
-    maxDiscountPct: 20,
-  },
-  {
-    sku: "XVF2M",
-    name: "xVoice UC Fax2Mail Service",
-    price: 0.99,
-    unit: "/Monat",
-    billing: "monthly",
-    desc: "Eingehende Faxe bequem als PDF per E-Mail (virtuelle Fax-Nebenstellen).",
-    maxDiscountPct: 100,
-  },
-];
-
-// ===== SETUP-TIERS: Fallback (falls keine /setup_tiers.csv) =====
-// CSV-Format (optional, im public/ ablegen):
-// minLicenses,maxLicenses,sku,name,price
-const SETUP_TIERS_FALLBACK: SetupTier[] = [
-  { minLicenses: 1,  maxLicenses: 10,  sku: "XVIKS10",  name: "Installations- & Konfigurationspauschale bis 10 User",  price: 299.0 },
-  { minLicenses: 11, maxLicenses: 20, sku: "XVIKS20",  name: "Installations- & Konfigurationspauschale bis 20 User",  price: 399.0 },
-  { minLicenses: 21, maxLicenses: 50, sku: "XVIKS50",  name: "Installations- & Konfigurationspauschale bis 50 User",  price: 899.0 },
-  { minLicenses: 51, maxLicenses: 100, sku: "XVIKS100",  name: "Installations- & Konfigurationspauschale bis 100 User",  price: 1299.0 },
-  { minLicenses: 101, maxLicenses: 200, sku: "XVIKS200",  name: "Installations- & Konfigurationspauschale bis 200 User",  price: 1699.0 },
-  { minLicenses: 201, maxLicenses: 500, sku: "XVIKS500",  name: "Installations- & Konfigurationspauschale bis 500 User",  price: 1999.0 },
-  { minLicenses: 501, maxLicenses: 1000, sku: "XVIKS1000",  name: "Installations- & Konfigurationspauschale bis 1000 User",  price: 2999.0 },
-  { minLicenses: 1001, maxLicenses: Number.POSITIVE_INFINITY, sku: "XVIKS_XXL", name: "Installations- & Konfigurationspauschale (XXL)", price: 4999.0 },
-];
-
-// ===== HARDWARE: Fallback (falls keine /hardware.csv) =====
-// CSV-Format (optional, im public/ ablegen):
-// sku,name,price,unit,desc,maxDiscountPct
+// ===== HARDWARE-KATALOG (anpassbar) =====
 const HARDWARE_MAX_DEFAULT = 10;
-const HARDWARE_FALLBACK: CatalogItem[] = [
-{ sku: "YEA-T54W", name: "Yealink T54W IP-Telefon", price: 149.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-T57W", name: "Yealink T57W IP-Telefon", price: 229.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-T58W", name: "Yealink T58W IP-Telefon", price: 259.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-T58W-PRO", name: "Yealink T58W Pro IP-Telefon", price: 289.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi, schnurloser Hörer", maxDiscountPct: HARDWARE_MAX_DEFAULT },
 
-  { sku: "YEA-W73P", name: "Yealink W73P DECT-Basis + Hörer", price: 109.0, billing: "one-time", unit: "Set", desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W74P", name: "Yealink W74P DECT-Basis + Hörer", price: 129.0, billing: "one-time", unit: "Set", desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W78P", name: "Yealink W78P DECT-Basis + Hörer", price: 149.0, billing: "one-time", unit: "Set", desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W73H", name: "Yealink W73H Handset", price: 69.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W74H", name: "Yealink W74H Handset", price: 89.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W78H", name: "Yealink W78H Handset", price: 99.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+const HARDWARE: CatalogItem[] = [
+  // Yealink T5x
+  { sku: "YEA-T54W",     name: "Yealink T54W IP-Telefon",      price: 149.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-T57W",     name: "Yealink T57W IP-Telefon",      price: 229.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-T58W",     name: "Yealink T58W IP-Telefon",      price: 259.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-T58W-PRO", name: "Yealink T58W Pro IP-Telefon",  price: 289.0, billing: "one-time", unit: "Stück", desc: "GigE, USB, BT, Wi-Fi, schnurloser Hörer", maxDiscountPct: HARDWARE_MAX_DEFAULT },
 
-  { sku: "YEA-W90DM", name: "Yealink W90 DECT Manager", price: 249.0, billing: "one-time", unit: "Stück", desc: "DECT-Multizellen-Manager für größere DECT-Umgebungen", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-W90B", name: "Yealink W90 DECT Base Station", price: 249.0, billing: "one-time", unit: "Stück", desc: "DECT-Multizellen-Basisstation; erfordert bei Ersteinrichtung einen DECT-Manager", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  // Yealink DECT
+  { sku: "YEA-W73P", name: "Yealink W73P DECT-Basis + Hörer", price: 109.0, billing: "one-time", unit: "Set",   desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W74P", name: "Yealink W74P DECT-Basis + Hörer", price: 129.0, billing: "one-time", unit: "Set",   desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W78P", name: "Yealink W78P DECT-Basis + Hörer", price: 149.0, billing: "one-time", unit: "Set",   desc: "Mobilteil inkl. Basis", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W73H", name: "Yealink W73H Handset",            price:  69.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W74H", name: "Yealink W74H Handset",            price:  89.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W78H", name: "Yealink W78H Handset",            price:  99.0, billing: "one-time", unit: "Stück", desc: "Mobilteil inkl. Ladeschale", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W90DM", name: "Yealink W90 DECT Manager",       price: 249.0, billing: "one-time", unit: "Stück", desc: "DECT-Multizellen-Manager", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-W90B",  name: "Yealink W90 DECT Base Station",  price: 249.0, billing: "one-time", unit: "Stück", desc: "Multizellen-Basisstation (benötigt Manager)", maxDiscountPct: HARDWARE_MAX_DEFAULT },
 
-  { sku: "YEA-WH64M", name: "Yealink WH64 mono Headset", price: 149.0, billing: "one-time", unit: "Stück", desc: "Monaurales Business-Headset", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-WH64D", name: "Yealink WH64 duo Headset", price: 159.0, billing: "one-time", unit: "Stück", desc: "Biaurales Business-Headset", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "YEA-WH68D", name: "Yealink WH68 duo hybrid Headset", price: 159.0, billing: "one-time", unit: "Stück", desc: "Biaurales Premium-Business-Headset", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  // Headsets
+  { sku: "YEA-WH64M", name: "Yealink WH64 mono Headset",          price: 149.0, billing: "one-time", unit: "Stück", desc: "Monaurales Business-Headset", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-WH64D", name: "Yealink WH64 duo Headset",           price: 159.0, billing: "one-time", unit: "Stück", desc: "Biaurales Business-Headset",  maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "YEA-WH68D", name: "Yealink WH68 duo hybrid Headset",    price: 159.0, billing: "one-time", unit: "Stück", desc: "Premium Business-Headset",    maxDiscountPct: HARDWARE_MAX_DEFAULT },
 
-  { sku: "GIG-D810", name: "Gigaset D810 IP Pro", price: 99.0, billing: "one-time", unit: "Stück", desc: "Professionelles IP-Tischtelefon mit 3,36″ TFT-Display", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "GIG-D820", name: "Gigaset D820 IP Pro", price: 119.0, billing: "one-time", unit: "Stück", desc: "Professionelles IP-Tischtelefon mit 5″ TFT-Display", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "GIG-D825", name: "Gigaset D825 IP Pro", price: 129.0, billing: "one-time", unit: "Stück", desc: "Professionelles IP-Tischtelefon mit 5″ TFT-Display", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "GIG-D850W", name: "Gigaset D850W IP Pro", price: 139.0, billing: "one-time", unit: "Stück", desc: "Professionelles IP-Tischtelefon mit 5″ TFT-Display und WLAN", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "GIG-D855BW", name: "Gigaset D855BW IP Pro", price: 159.0, billing: "one-time", unit: "Stück", desc: "Professionelles IP-Tischtelefon mit 5″ TFT-Display, Bluetooth und WLAN", maxDiscountPct: HARDWARE_MAX_DEFAULT },
-  { sku: "GIG-P800KP", name: "Gigaset P800 Key Pro Tastenmodul", price: 119.0, billing: "one-time", unit: "Stück", desc: "Erweiterungsmodul für IP-Tischtelefone mit 20 physischen Tasten", maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  // Gigaset D-Serie
+  { sku: "GIG-D810",  name: "Gigaset D810 IP Pro",  price:  99.0, billing: "one-time", unit: "Stück", desc: "IP-Tischtelefon mit 3,36″ TFT-Display",                         maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "GIG-D820",  name: "Gigaset D820 IP Pro",  price: 119.0, billing: "one-time", unit: "Stück", desc: "IP-Tischtelefon mit 5″ TFT-Display",                            maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "GIG-D825",  name: "Gigaset D825 IP Pro",  price: 129.0, billing: "one-time", unit: "Stück", desc: "IP-Tischtelefon mit 5″ TFT-Display",                            maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "GIG-D850W", name: "Gigaset D850W IP Pro", price: 139.0, billing: "one-time", unit: "Stück", desc: "IP-Tischtelefon mit 5″ TFT-Display und WLAN",                   maxDiscountPct: HARDWARE_MAX_DEFAULT },
+  { sku: "GIG-P800KP",name: "Gigaset P800 Key Pro Tastenmodul", price: 119.0, billing: "one-time", unit: "Stück", desc: "Erweiterungsmodul mit 20 physischen Tasten", maxDiscountPct: HARDWARE_MAX_DEFAULT },
 ];
 
 // ===== ENDPOINTS =====
 const EMAIL_ENDPOINT = "/api/send-offer";
-const ORDER_ENDPOINT = "/api/place-order";
 
 // ===== UTILS =====
 function formatMoney(value: number) {
-  return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+  }).format(value);
 }
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 function escapeHtml(str: string) {
-  return String(str).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 function fullCustomerAddress(c: Customer) {
-  const lines = [c.company || "", c.contact || "", c.street || "", [c.zip, c.city].filter(Boolean).join(" "), c.email || "", c.phone || ""].filter(Boolean);
+  const lines = [
+    c.company || "",
+    c.contact || "",
+    c.street || "",
+    [c.zip, c.city].filter(Boolean).join(" "),
+    c.email || "",
+    c.phone || "",
+  ].filter(Boolean);
   return lines.join("\n");
 }
 function greetingLine(c: Customer) {
@@ -213,27 +137,8 @@ function greetingLine(c: Customer) {
   if (!name) return "Guten Tag,";
   return c.salutation === "Frau" ? `Sehr geehrte Frau ${name},` : `Sehr geehrter Herr ${name},`;
 }
-function detectDelimiter(headerLine: string) {
-  // simple heuristic
-  if (headerLine.includes(";") && !headerLine.includes(",")) return ";";
-  return ","; // default
-}
-function parseCsvLines(csv: string): string[][] {
-  // basic parser for unquoted/ simply quoted fields; handles ; or , based on header
-  const lines = csv.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length === 0) return [];
-  const delim = detectDelimiter(lines[0]);
-  return lines.map(line => {
-    // very light parser: split by delim; trim quotes
-    return line.split(delim).map(cell => {
-      const t = cell.trim();
-      const m = t.match(/^"(.*)"$/);
-      return m ? m[1].replace(/""/g, '"') : t;
-    });
-  });
-}
 
-// ===== EMAIL HTML =====
+// ===== EMAIL HTML (nur EINMALIG) =====
 type BuiltRow = {
   sku: string;
   name: string;
@@ -245,14 +150,14 @@ type BuiltRow = {
   offerTotal: number;
   badgePct: number;
 };
+
 function buildEmailHtml(params: {
   customer: Customer;
   salesperson: Salesperson;
-  monthlyRows: BuiltRow[];
-  oneTimeRows: BuiltRow[];
+  rows: BuiltRow[];
   vatRate: number;
 }) {
-  const { customer, salesperson, monthlyRows, oneTimeRows, vatRate } = params;
+  const { customer, salesperson, rows, vatRate } = params;
 
   const s = {
     body: "margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#111",
@@ -270,7 +175,7 @@ function buildEmailHtml(params: {
     th: "text-align:left;padding:10px 8px;font-size:12px;border-bottom:1px solid #eee;color:#555;white-space:nowrap",
     td: "padding:10px 8px;font-size:13px;border-bottom:1px solid #f1f1f5;vertical-align:top",
     totalLabel: "padding:8px 8px;font-size:13px;white-space:nowrap;width:260px;text-align:right",
-    totalValue: "padding:8px 8px;font-size:13px",
+    totalValue: "padding:8px 8px;font-size:13px;text-align:right",
     priceList: "display:inline-block;text-decoration:line-through;opacity:.6;margin-right:8px",
     priceOffer: `display:inline-block;color:${BRAND.primary};font-weight:bold`,
     badge: `display:inline-block;background:${BRAND.primary};color:#fff;border-radius:999px;padding:2px 8px;font-size:11px;margin-left:8px;vertical-align:middle`,
@@ -280,12 +185,8 @@ function buildEmailHtml(params: {
     addressBox: "background:#f2f3f7;border-radius:6px;padding:10px 14px;margin-top:12px;margin-bottom:18px;line-height:1.55;font-size:13px;color:#333;",
   };
 
-  const clientImage = "https://onecdn.io/media/5b9be381-eed9-40b6-99ef-25a944a49927/full";
-  const ceoPhoto = "https://onecdn.io/media/10febcbf-6c57-4af7-a0c4-810500fea565/full";
-  const ceoSign = "https://onecdn.io/media/b96f734e-465e-4679-ac1b-1c093a629530/full";
-
-  function rowsHtml(rows: BuiltRow[]) {
-    return rows
+  function rowsHtml(list: BuiltRow[]) {
+    return list
       .map(
         (li) => `
       <tr>
@@ -317,9 +218,9 @@ function buildEmailHtml(params: {
       .join("");
   }
 
-  function totalsSection(rows: BuiltRow[]) {
-    const listSubtotal = rows.reduce((a, r) => a + r.listTotal, 0);
-    const offerSubtotal = rows.reduce((a, r) => a + r.offerTotal, 0);
+  function totalsSection(list: BuiltRow[]) {
+    const listSubtotal = list.reduce((a, r) => a + r.listTotal, 0);
+    const offerSubtotal = list.reduce((a, r) => a + r.offerTotal, 0);
     const discount = Math.max(0, listSubtotal - offerSubtotal);
     const vat = offerSubtotal * vatRate;
     const gross = offerSubtotal + vat;
@@ -374,60 +275,22 @@ function buildEmailHtml(params: {
         <table style="${s.headerTable}">
           <tr>
             <td><img src="${BRAND.logoUrl}" alt="xVoice Logo" style="${s.logo}" /></td>
-           </tr>
+            <td style="text-align:right"><p style="${s.pSmall}">${COMPANY.web} · ${COMPANY.email} · ${COMPANY.phone}</p></td>
+          </tr>
         </table>
       </div>
       <div style="${s.accent}"></div>
       <div style="${s.inner}">
-        <h2 style="${s.h1}">Ihr individuelles Angebot</h2>
+        <h2 style="${s.h1}">Ihr individuelles Hardware-Angebot</h2>
         ${customer.company ? `<p style="${s.p}"><strong>${escapeHtml(customer.company)}</strong></p>` : `<p style="${s.p}"><strong>Firma unbekannt</strong></p>`}
         ${addressCustomer ? `<div style="${s.addressBox}">${escapeHtml(addressCustomer).replace(/\n/g, "<br>")}</div>` : ""}
         <p style="${s.p}">${escapeHtml(greetingLine(customer))}</p>
 
-        <p style="${s.p}">vielen Dank für Ihr Interesse an xVoice UC. Unsere cloudbasierte Kommunikationslösung verbindet moderne Telefonie mit Microsoft Teams und führenden CRM-Systemen – sicher, skalierbar und in deutschen Rechenzentren betrieben.</p>
-        <p style="${s.p}">Unsere Lösung bietet Ihnen nicht nur höchste Flexibilität und Ausfallsicherheit, sondern lässt sich auch vollständig in Ihre bestehende Umgebung integrieren. Auf Wunsch übernehmen wir gerne die gesamte Koordination der Umstellung, sodass Sie sich um nichts kümmern müssen.</p>
-        <p style="${s.p}">Gerne bespreche ich die nächsten Schritte gemeinsam mit Ihnen – telefonisch oder per Teams-Call, ganz wie es Ihnen am besten passt.</p>
-        <p style="${s.p}">Ich freue mich auf Ihre Rückmeldung und auf die Möglichkeit, Sie bald als neuen xVoice UC Kunden zu begrüßen.</p>
-
-        <table width="100%" style="margin:26px 0 26px 0;border-collapse:collapse">
-          <tr>
-            <td style="vertical-align:top;width:55%;padding-right:20px">
-              <h3 style="${s.h3}">Warum xVoice UC?</h3>
-              <ul style="padding-left:18px;margin:8px 0 12px 0">
-                <li style="${s.pSmall.replace("12px","14px")}">Nahtlose Integration in Microsoft Teams & CRM/Helpdesk</li>
-                <li style="${s.pSmall.replace("12px","14px")}">Cloud in Deutschland · DSGVO-konform</li>
-                <li style="${s.pSmall.replace("12px","14px")}">Schnelle Bereitstellung, skalierbar je Nutzer</li>
-                <li style="${s.pSmall.replace("12px","14px")}">Optionale 4h-SLA & priorisierter Support</li>
-              </ul>
-            </td>
-            <td style="vertical-align:top;width:45%">
-              <img src="https://onecdn.io/media/5b9be381-eed9-40b6-99ef-25a944a49927/full" alt="xVoice UC Client" style="width:100%;border-radius:10px;border:1px solid #eee;display:block" />
-            </td>
-          </tr>
-        </table>
-
-        <!-- MONATLICHE POSITIONEN -->
-        <h3 style="${s.h3};margin-top:8px">Monatliche Positionen</h3>
-        <table width="100%" style="border-collapse:collapse;margin-top:6px">
-          <thead>
-            <tr>
-              <th style="${s.th}">Position</th>
-              <th style="${s.th}">Menge</th>
-              <th style="${s.th}">Einzelpreis</th>
-              <th style="${s.th}">Summe</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml(monthlyRows)}
-            ${totalsSection(monthlyRows)}
-          </tbody>
-        </table>
+        <p style="${s.p}">vielen Dank für Ihr Interesse an xVoice UC. Unsere Hardwareempfehlung haben wir nach Ihren Anforderungen zusammengestellt.</p>
+        <p style="${s.p}">Gerne bespreche ich die nächsten Schritte mit Ihnen – telefonisch oder per Teams-Call, ganz wie es Ihnen am besten passt.</p>
 
         <!-- EINMALIGE POSITIONEN -->
-        ${
-          oneTimeRows.length > 0
-            ? `
-        <h3 style="${s.h3};margin-top:18px">Einmalige Positionen</h3>
+        <h3 style="${s.h3};margin-top:8px">Einmalige Positionen</h3>
         <table width="100%" style="border-collapse:collapse;margin-top:6px">
           <thead>
             <tr>
@@ -438,16 +301,13 @@ function buildEmailHtml(params: {
             </tr>
           </thead>
           <tbody>
-            ${rowsHtml(oneTimeRows)}
-            ${totalsSection(oneTimeRows)}
+            ${rowsHtml(rows)}
+            ${totalsSection(rows)}
           </tbody>
         </table>
-        `
-            : ""
-        }
 
-        <div style="margin-top:16px;display:flex1;gap:10px;flex-wrap:wrap">
-          <a href="mailto:orders@xvoice-uc.de?subject=Bestellung%20zu%20Angebot%20{{OFFER_ID}}&body=Ich%20bestelle%20das%20Angebot%20{{OFFER_ID}}.%0D%0ABitte%20best%C3%A4tigen%20Sie%20die%20Auftragsannahme.%0D%0A--%0D%0AFirma:%20{{COMPANY}}%0D%0AName:%20{{CONTACT_NAME}}%0DTelefon:%20{{PHONE}}" style="${s.btn}">Jetzt bestellen</a>
+        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+          <a href="mailto:orders@xvoice-uc.de?subject=Hardware-Bestellung&body=Ich%20bestelle%20gem%C3%A4%C3%9F%20Angebot." style="${s.btn}">Jetzt bestellen</a>
           <a href="https://calendly.com/s-brandl-xvoice-uc/ruckfragen-zum-angebot" target="_blank" rel="noopener" style="${s.btnGhost}">Rückfrage zum Angebot</a>
         </div>
 
@@ -470,7 +330,7 @@ function buildEmailHtml(params: {
                 <img src="https://onecdn.io/media/10febcbf-6c57-4af7-a0c4-810500fea565/full" alt="Sebastian Brandl" style="width:100%;max-width:120px;border:1px solid #eee;border-radius:0;display:block" />
               </td>
               <td style="vertical-align:top;padding-left:20px">
-                <p style="${s.p}"><em>„Unser Ziel ist es, Kommunikation für Ihr Team spürbar einfacher zu machen – ohne Kompromisse bei Sicherheit und Service. Gerne begleiten wir Sie von der Planung bis zum Go-Live.“</em></p>
+                <p style="${s.p}"><em>„Unser Ziel ist es, Kommunikation für Ihr Team spürbar einfacher zu machen – ohne Kompromisse bei Sicherheit und Service.“</em></p>
                 <img src="https://onecdn.io/media/b96f734e-465e-4679-ac1b-1c093a629530/full" alt="Unterschrift Sebastian Brandl" style="width:160px;margin-top:8px;display:block" />
                 <p style="${s.p}"><strong>Sebastian Brandl</strong> · Geschäftsführer</p>
               </td>
@@ -503,12 +363,16 @@ function Header() {
       style={{ background: BRAND.headerBg, color: BRAND.headerFg }}
     >
       <div className="flex items-center gap-6">
-        <img src={BRAND.logoUrl} alt="xVoice Logo" className="h-32 w-32 object-contain" />
+        <img
+          src={BRAND.logoUrl}
+          alt="xVoice Logo"
+          className="h-24 w-24 object-contain" // größer
+        />
         <div>
-          <div className="text-sm opacity-80" style={{ color: BRAND.headerFg }}>
-            Angebots- und Bestell-Konfigurator
-          </div>
           <div className="text-2xl font-semibold" style={{ color: BRAND.headerFg }} />
+          <div className="text-sm opacity-80" style={{ color: BRAND.headerFg }}>
+            Hardware-Angebots-Konfigurator
+          </div>
         </div>
       </div>
       <div className="text-sm" style={{ color: "#d1d5db" }}>
@@ -544,7 +408,6 @@ function ProductRow({
   onQty,
   discountPct,
   onDiscountPct,
-  readOnly,
   helper,
   cap,
 }: {
@@ -553,7 +416,6 @@ function ProductRow({
   onQty: (v: number) => void;
   discountPct: number;
   onDiscountPct: (v: number) => void;
-  readOnly?: boolean;
   helper?: string;
   cap: number;
 }) {
@@ -565,7 +427,7 @@ function ProductRow({
       <div>
         <div className="font-medium">{item.name}</div>
         <div className="text-xs text-muted-foreground">
-          {item.sku} · {item.desc}
+          {item.sku} {item.desc ? `· ${item.desc}` : ""}
         </div>
       </div>
 
@@ -587,7 +449,7 @@ function ProductRow({
         )}
       </div>
 
-      {/* Menge & Rabatt identische Breite */}
+      {/* Menge & Rabatt: identische Breite (w-28) */}
       <div className="grid grid-cols-2 gap-3 items-center">
         <div className="flex items-center gap-2">
           <Input
@@ -597,7 +459,6 @@ function ProductRow({
             value={qty}
             onChange={(e) => onQty(Math.max(0, Math.floor(Number(e.target.value || 0))))}
             className="w-28"
-            disabled={!!readOnly}
           />
           <span className="text-xs text-muted-foreground">{item.unit || ""}</span>
         </div>
@@ -612,7 +473,6 @@ function ProductRow({
               onDiscountPct(Math.max(0, Math.min(cap, Number(e.target.value || 0))))
             }
             className="w-28"
-            disabled={cap === 0}
           />
           <span className="text-xs text-muted-foreground">max {cap}%</span>
         </div>
@@ -629,15 +489,7 @@ function ProductRow({
   );
 }
 
-function Totals({
-  title,
-  rows,
-  vatRate,
-}: {
-  title: string;
-  rows: { listTotal: number; offerTotal: number }[];
-  vatRate: number;
-}) {
+function Totals({ rows, vatRate }: { rows: { listTotal: number; offerTotal: number }[]; vatRate: number }) {
   const listSubtotal = rows.reduce((a, r) => a + r.listTotal, 0);
   const offerSubtotal = rows.reduce((a, r) => a + r.offerTotal, 0);
   const discount = Math.max(0, listSubtotal - offerSubtotal);
@@ -655,13 +507,9 @@ function Totals({
 
   return (
     <div className="space-y-1 text-sm">
-      <div className="text-sm font-medium mb-1">{title}</div>
       <Row label="Listen-Zwischensumme (netto)" value={formatMoney(listSubtotal)} />
       {discount > 0 && <Row label="Rabatt gesamt" value={"−" + formatMoney(discount)} />}
-      <Row
-        label={discount > 0 ? "Zwischensumme nach Rabatt" : "Zwischensumme (netto)"}
-        value={formatMoney(offerSubtotal)}
-      />
+      <Row label={discount > 0 ? "Zwischensumme nach Rabatt" : "Zwischensumme (netto)"} value={formatMoney(offerSubtotal)} />
       <Row label="zzgl. USt. (19%)" value={formatMoney(vat)} />
       <Row label="Bruttosumme" value={formatMoney(gross)} strong />
     </div>
@@ -670,81 +518,11 @@ function Totals({
 
 // ===== PAGE =====
 export default function Page() {
-  // dynamische Kataloge (Hardware/Setup-Tiers können aus CSV kommen)
-  const [hardwareCatalog, setHardwareCatalog] = useState<CatalogItem[]>(HARDWARE_FALLBACK);
-  const [setupTiers, setSetupTiers] = useState<SetupTier[]>(SETUP_TIERS_FALLBACK);
-
-  // CSV laden (optional)
-  useEffect(() => {
-    // Hardware
-    fetch("/hardware.csv", { cache: "no-store" })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(String(r.status));
-        const text = await r.text();
-        const rows = parseCsvLines(text);
-        if (rows.length < 2) return; // header + at least 1 row
-        const header = rows[0].map((h) => h.toLowerCase());
-        const idx = {
-          sku: header.indexOf("sku"),
-          name: header.indexOf("name"),
-          price: header.indexOf("price"),
-          unit: header.indexOf("unit"),
-          desc: header.indexOf("desc"),
-          maxDiscountPct: header.indexOf("maxdiscountpct"),
-        };
-        const list: CatalogItem[] = [];
-        for (let i = 1; i < rows.length; i++) {
-          const r = rows[i];
-          const sku = r[idx.sku] || "";
-          const name = r[idx.name] || "";
-          const price = parseFloat((r[idx.price] || "").replace(",", "."));
-          if (!sku || !name || !isFinite(price)) continue;
-          const unit = idx.unit >= 0 ? r[idx.unit] || undefined : undefined;
-          const desc = idx.desc >= 0 ? r[idx.desc] || undefined : undefined;
-          const maxDiscountPct = idx.maxDiscountPct >= 0 ? parseFloat((r[idx.maxDiscountPct] || "10").replace(",", ".")) : HARDWARE_MAX_DEFAULT;
-          list.push({ sku, name, price, unit, desc, billing: "one-time", maxDiscountPct: isFinite(maxDiscountPct) ? maxDiscountPct : HARDWARE_MAX_DEFAULT });
-        }
-        if (list.length > 0) setHardwareCatalog(list);
-      })
-      .catch(() => { /* fallback bleibt */ });
-
-    // Setup-Tiers
-    fetch("/setup_tiers.csv", { cache: "no-store" })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(String(r.status));
-        const text = await r.text();
-        const rows = parseCsvLines(text);
-        if (rows.length < 2) return;
-        const header = rows[0].map((h) => h.toLowerCase());
-        const idx = {
-          minLicenses: header.indexOf("minlicenses"),
-          maxLicenses: header.indexOf("maxlicenses"),
-          sku: header.indexOf("sku"),
-          name: header.indexOf("name"),
-          price: header.indexOf("price"),
-        };
-        const tiers: SetupTier[] = [];
-        for (let i = 1; i < rows.length; i++) {
-          const r = rows[i];
-          const minLicenses = parseInt((r[idx.minLicenses] || "0").trim(), 10);
-          const maxLicensesRaw = (r[idx.maxLicenses] || "").trim();
-          const maxLicenses = maxLicensesRaw.toLowerCase() === "inf" || maxLicensesRaw === "" ? Number.POSITIVE_INFINITY : parseInt(maxLicensesRaw, 10);
-          const sku = r[idx.sku] || "";
-          const name = r[idx.name] || "";
-          const price = parseFloat((r[idx.price] || "").replace(",", "."));
-          if (!sku || !name || !isFinite(price) || !Number.isFinite(minLicenses) || !Number.isFinite(maxLicenses)) continue;
-          tiers.push({ minLicenses, maxLicenses, sku, name, price });
-        }
-        if (tiers.length > 0) setSetupTiers(tiers);
-      })
-      .catch(() => { /* fallback bleibt */ });
-  }, []);
+  const [vatRate] = useState(0.19);
 
   // Mengen & Rabatte
-  const ALL = [...MONTHLY, ...hardwareCatalog]; // dynamisch
-  const [qty, setQty] = useState<Record<string, number>>(Object.fromEntries(ALL.map((p) => [p.sku, 0])));
-  const [discPct, setDiscPct] = useState<Record<string, number>>(Object.fromEntries(ALL.map((p) => [p.sku, 0])));
-  const [vatRate] = useState(0.19);
+  const [qty, setQty] = useState<Record<string, number>>(Object.fromEntries(HARDWARE.map(p => [p.sku, 0])));
+  const [discPct, setDiscPct] = useState<Record<string, number>>(Object.fromEntries(HARDWARE.map(p => [p.sku, 0])));
 
   // Kunde / Vertrieb
   const [customer, setCustomer] = useState<Customer>({
@@ -760,76 +538,15 @@ export default function Page() {
   });
   const [salesperson, setSalesperson] = useState<Salesperson>({ name: "", email: "vertrieb@xvoice-uc.de", phone: "" });
   const [salesEmail, setSalesEmail] = useState("vertrieb@xvoice-uc.de");
-  const [subject, setSubject] = useState("Ihr individuelles xVoice UC Angebot");
+  const [subject, setSubject] = useState("Ihr individuelles xVoice UC Hardware-Angebot");
 
-  // XVPS automatisch
-  const serviceAutoQty = useMemo(() => (qty["XVPR"] || 0) + (qty["XVDV"] || 0) + (qty["XVMO"] || 0), [qty]);
-
-  // Bei dynamisch geladener Hardware müssen wir qty/disc ggf. erweitern
-  useEffect(() => {
-    setQty((prev) => {
-      const next = { ...prev };
-      for (const p of hardwareCatalog) if (!(p.sku in next)) next[p.sku] = 0;
-      return next;
-    });
-    setDiscPct((prev) => {
-      const next = { ...prev };
-      for (const p of hardwareCatalog) if (!(p.sku in next)) next[p.sku] = 0;
-      return next;
-    });
-  }, [hardwareCatalog]);
-
-  function capForSku(sku: string) {
-    const found = ALL.find((i) => i.sku === sku);
-    return found?.maxDiscountPct ?? 0;
-  }
-
-  // Monatspositionen
-  const monthlyRows = useMemo(() => {
+  // Zeilen bauen
+  const oneTimeRows: BuiltRow[] = useMemo(() => {
     const rows: BuiltRow[] = [];
-    for (const p of MONTHLY) {
-      const isXVPS = p.sku === "XVPS";
-      const q = isXVPS ? serviceAutoQty : (qty[p.sku] || 0);
-      if (isXVPS && q <= 0) continue;
-      if (!isXVPS && q <= 0) continue;
-
-      const cap = capForSku(p.sku);
-      const pct = Math.max(0, Math.min(cap, discPct[p.sku] || 0));
-      const listUnit = p.price;
-      const offerUnit = p.price * (pct ? (1 - pct / 100) : 1);
-      const listTotal = listUnit * q;
-      const offerTotal = offerUnit * q;
-      const badgePct = listUnit > 0 ? Math.round((1 - offerUnit / listUnit) * 100) : 0;
-
-      rows.push({
-        sku: p.sku,
-        name: p.name,
-        desc: p.desc,
-        quantity: q,
-        listUnit,
-        offerUnit,
-        listTotal,
-        offerTotal,
-        badgePct: Math.max(0, Math.min(100, badgePct)),
-      });
-    }
-    return rows;
-  }, [qty, discPct, serviceAutoQty]);
-
-  // Setup aus Tiers
-  function pickSetupTier(totalCoreSeats: number): SetupTier | null {
-    if (!Number.isFinite(totalCoreSeats) || totalCoreSeats <= 0) return null;
-    return setupTiers.find(t => totalCoreSeats >= t.minLicenses && totalCoreSeats <= t.maxLicenses) ?? null;
-  }
-  const selectedSetup = useMemo(() => pickSetupTier(serviceAutoQty), [serviceAutoQty, setupTiers]);
-
-  // Hardware
-  const hardwareRows = useMemo(() => {
-    const rows: BuiltRow[] = [];
-    for (const p of hardwareCatalog) {
+    for (const p of HARDWARE) {
       const q = qty[p.sku] || 0;
       if (q <= 0) continue;
-      const cap = capForSku(p.sku);
+      const cap = p.maxDiscountPct ?? HARDWARE_MAX_DEFAULT;
       const pct = Math.max(0, Math.min(cap, discPct[p.sku] || 0));
       const listUnit = p.price;
       const offerUnit = p.price * (pct ? (1 - pct / 100) : 1);
@@ -850,40 +567,18 @@ export default function Page() {
       });
     }
     return rows;
-  }, [qty, discPct, hardwareCatalog]);
+  }, [qty, discPct]);
 
-  // Einmalige Positionen zusammensetzen (Setup zuerst)
-  const oneTimeRows = useMemo(() => {
-    const rows: BuiltRow[] = [];
-    if (selectedSetup) {
-      rows.push({
-        sku: selectedSetup.sku,
-        name: selectedSetup.name,
-        desc:
-          "Mit der xVoice UC Installations- und Konfigurationspauschale richten wir Ihre Umgebung vollständig ein (Benutzer, Rufnummern, Routing, Devices, Client-Profile). Die Einrichtung erfolgt remote.",
-        quantity: 1,
-        listUnit: selectedSetup.price,
-        offerUnit: selectedSetup.price,
-        listTotal: selectedSetup.price,
-        offerTotal: selectedSetup.price,
-        badgePct: 0,
-      });
-    }
-    rows.push(...hardwareRows);
-    return rows;
-  }, [hardwareRows, selectedSetup]);
-
-  // HTML bauen
+  // HTML
   const offerHtml = useMemo(
     () =>
       buildEmailHtml({
         customer,
         salesperson,
-        monthlyRows,
-        oneTimeRows,
+        rows: oneTimeRows,
         vatRate,
       }),
-    [customer, salesperson, monthlyRows, oneTimeRows, vatRate]
+    [customer, salesperson, oneTimeRows, vatRate]
   );
 
   // UX
@@ -893,7 +588,7 @@ export default function Page() {
   const [copyOk, setCopyOk] = useState(false);
   const [copyError, setCopyError] = useState("");
 
-  // Preview / Download / Copy
+  // Actions
   function openPreviewNewTab() {
     try {
       const blob = new Blob([offerHtml], { type: "text/html;charset=utf-8" });
@@ -918,7 +613,7 @@ export default function Page() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `xvoice_angebot_${todayIso()}.html`;
+      a.download = `xvoice_hardware_angebot_${todayIso()}.html`;
       a.style.display = "none";
       document.body.appendChild(a);
       a.click();
@@ -931,7 +626,7 @@ export default function Page() {
     try {
       const a = document.createElement("a");
       a.href = "data:text/html;charset=utf-8," + encodeURIComponent(offerHtml);
-      a.download = `xvoice_angebot_${todayIso()}.html`;
+      a.download = `xvoice_hardware_angebot_${todayIso()}.html`;
       a.target = "_blank";
       a.rel = "noopener";
       a.style.display = "none";
@@ -943,7 +638,7 @@ export default function Page() {
     }
   }
 
-  async function safeCopyToClipboard(text: string) {
+  async function safeCopyToClipboard(text: string): Promise<{ ok: boolean; via?: string; error?: any }> {
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
@@ -980,7 +675,7 @@ export default function Page() {
       const msg = String(err?.message || err || "");
       if (/UnsupportedHttpVerb|405|method not allowed/i.test(msg)) {
         const minimal = {
-          subject: payload?.meta?.subject || "xVoice Angebot",
+          subject: payload?.meta?.subject || "xVoice Hardware-Angebot",
           to: (payload?.recipients || []).join(","),
           company: payload?.customer?.company || "",
         };
@@ -998,19 +693,15 @@ export default function Page() {
     setError("");
     setSendOk(false);
     try {
-      const mList = monthlyRows.reduce((a, r) => a + r.listTotal, 0);
-      const mOffer = monthlyRows.reduce((a, r) => a + r.offerTotal, 0);
-      const oList = oneTimeRows.reduce((a, r) => a + r.listTotal, 0);
-      const oOffer = oneTimeRows.reduce((a, r) => a + r.offerTotal, 0);
+      const netList = oneTimeRows.reduce((a, r) => a + r.listTotal, 0);
+      const netOffer = oneTimeRows.reduce((a, r) => a + r.offerTotal, 0);
       await postJson(EMAIL_ENDPOINT, {
         meta: { subject },
         offerHtml,
         customer,
-        monthlyRows,
         oneTimeRows,
         totals: {
-          monthly: { netList: mList, netOffer: mOffer, vat: mOffer * vatRate, gross: mOffer * (1 + vatRate) },
-          oneTime: { netList: oList, netOffer: oOffer, vat: oOffer * vatRate, gross: oOffer * (1 + vatRate) },
+          oneTime: { netList, netOffer, vat: netOffer * vatRate, gross: netOffer * (1 + vatRate) },
         },
         salesperson,
         recipients: [customer.email, salesEmail].filter(Boolean),
@@ -1023,31 +714,9 @@ export default function Page() {
     }
   }
 
-  async function handleOrderNow() {
-    setSending(true);
-    setError("");
-    setSendOk(false);
-    try {
-      await postJson(ORDER_ENDPOINT, {
-        orderIntent: true,
-        offerHtml,
-        customer,
-        monthlyRows,
-        oneTimeRows,
-      });
-      setSendOk(true);
-    } catch (e: any) {
-      setError(String(e?.message || e));
-    } finally {
-      setSending(false);
-    }
-  }
-
   function resetAll() {
-    const baseQty = Object.fromEntries([...MONTHLY, ...hardwareCatalog].map((p) => [p.sku, 0]));
-    const baseDisc = Object.fromEntries([...MONTHLY, ...hardwareCatalog].map((p) => [p.sku, 0]));
-    setQty(baseQty);
-    setDiscPct(baseDisc);
+    setQty(Object.fromEntries(HARDWARE.map((p) => [p.sku, 0])));
+    setDiscPct(Object.fromEntries(HARDWARE.map((p) => [p.sku, 0])));
     setCustomer({ salutation: "", company: "", contact: "", email: "", phone: "", street: "", zip: "", city: "", notes: "" });
     setSalesperson({ name: "", email: "vertrieb@xvoice-uc.de", phone: "" });
     setSendOk(false);
@@ -1061,8 +730,8 @@ export default function Page() {
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <Header />
 
-      {/* 1. Lizenzen (monatlich) */}
-      <Section title="1. Lizenzen (monatlich)" action={<div className="text-xs opacity-70">USt. fest: 19%</div>}>
+      {/* 1. Hardware (einmalig) */}
+      <Section title="Hardware (einmalig)" action={<div className="text-xs opacity-70">USt. fest: 19%</div>}>
         <div className="grid grid-cols-1 gap-2">
           <div className="grid grid-cols-[minmax(260px,1fr)_120px_260px_140px] gap-4 text-xs uppercase text-muted-foreground pb-2 border-b">
             <div>Produkt</div>
@@ -1071,49 +740,7 @@ export default function Page() {
             <div className="text-right">Summe</div>
           </div>
 
-          {MONTHLY.map((item) => {
-            const isService = item.sku === "XVPS";
-            const q = isService ? serviceAutoQty : (qty[item.sku] || 0);
-            const onQ = isService
-              ? () => {}
-              : (v: number) => setQty((prev) => ({ ...prev, [item.sku]: Math.max(0, Math.floor(v)) }));
-            const cap = item.maxDiscountPct ?? 0;
-            const onD = (v: number) => setDiscPct((prev) => ({ ...prev, [item.sku]: Math.max(0, Math.min(cap, v)) }));
-            const helper = isService ? "Anzahl = Summe aus Premium, Device & Smartphone (automatisch)" : undefined;
-
-            return (
-              <ProductRow
-                key={item.sku}
-                item={item}
-                qty={q}
-                onQty={onQ}
-                discountPct={discPct[item.sku] || 0}
-                onDiscountPct={onD}
-                readOnly={isService}
-                helper={helper}
-                cap={cap}
-              />
-            );
-          })}
-        </div>
-
-        <div className="mt-4 flex items-start justify-between gap-6">
-          <div className="text-xs opacity-80">Alle Preise netto zzgl. der gültigen USt. Angaben ohne Gewähr. Änderungen vorbehalten.</div>
-          <Totals title="Monatliche Summe" rows={monthlyRows} vatRate={vatRate} />
-        </div>
-      </Section>
-
-      {/* 2. Hardware (einmalig) */}
-      <Section title="2. Hardware (einmalig)">
-        <div className="grid grid-cols-1 gap-2">
-          <div className="grid grid-cols-[minmax(260px,1fr)_120px_260px_140px] gap-4 text-xs uppercase text-muted-foreground pb-2 border-b">
-            <div>Produkt</div>
-            <div>Listenpreis</div>
-            <div>Menge & Rabatt</div>
-            <div className="text-right">Summe</div>
-          </div>
-
-          {hardwareCatalog.map((item) => {
+          {HARDWARE.map((item) => {
             const q = qty[item.sku] || 0;
             const onQ = (v: number) => setQty((prev) => ({ ...prev, [item.sku]: Math.max(0, Math.floor(v)) }));
             const cap = item.maxDiscountPct ?? HARDWARE_MAX_DEFAULT;
@@ -1127,34 +754,36 @@ export default function Page() {
                 onQty={onQ}
                 discountPct={discPct[item.sku] || 0}
                 onDiscountPct={onD}
-                readOnly={false}
                 cap={cap}
               />
             );
           })}
         </div>
 
-        <div className="mt-3 text-xs text-muted-foreground">
-          Die Installations- & Konfigurationspauschale wird automatisch anhand der Anzahl der Kernlizenzen (XVPR, XVDV, XVMO) ermittelt.
-          {(() => {
-            const sel = setupTiers && setupTiers.length > 0 ? setupTiers.find(t => serviceAutoQty >= t.minLicenses && serviceAutoQty <= t.maxLicenses) : null;
-            return sel ? ` Aktuell zugeordnet: ${sel.name} (${formatMoney(sel.price)}).` : " Wird angezeigt, sobald mindestens eine Kernlizenz gewählt wurde.";
-          })()}
-        </div>
-
         <div className="mt-4 flex items-start justify-between gap-6">
-          <div className="text-xs opacity-80">Alle Preise netto zzgl. der gültigen USt. Angaben ohne Gewähr. Änderungen vorbehalten.</div>
-          <Totals title="Einmalige Summe" rows={(() => {
-            const rows = [];
-            const sel = setupTiers.find(t => serviceAutoQty >= t.minLicenses && serviceAutoQty <= t.maxLicenses);
-            if (sel && serviceAutoQty > 0) rows.push({ listTotal: sel.price, offerTotal: sel.price });
-            for (const hr of hardwareRows) rows.push({ listTotal: hr.listTotal, offerTotal: hr.offerTotal });
-            return rows;
-          })()} vatRate={vatRate} />
+          <div className="text-xs opacity-80">
+            Alle Preise netto zzgl. der gültigen USt. Angaben ohne Gewähr. Änderungen vorbehalten.
+          </div>
+          <Totals
+            rows={(() => {
+              const rows = [];
+              for (const p of HARDWARE) {
+                const q = qty[p.sku] || 0;
+                if (q <= 0) continue;
+                const cap = p.maxDiscountPct ?? HARDWARE_MAX_DEFAULT;
+                const pct = Math.max(0, Math.min(cap, discPct[p.sku] || 0));
+                const listUnit = p.price;
+                const offerUnit = p.price * (pct ? (1 - pct / 100) : 1);
+                rows.push({ listTotal: listUnit * q, offerTotal: offerUnit * q });
+              }
+              return rows;
+            })()}
+            vatRate={vatRate}
+          />
         </div>
       </Section>
 
-      {/* 3. Kundendaten & Versand */}
+      {/* 2. Kundendaten & Versand */}
       <Section title="Kundendaten & Versand">
         <div className="grid md:grid-cols-3 gap-4">
           <div className="flex items-center gap-2">
@@ -1225,9 +854,6 @@ export default function Page() {
           <Button onClick={handleSendEmail} disabled={sending} className="gap-2" style={{ backgroundColor: BRAND.primary }}>
             <Mail size={16} /> Angebot per Mail senden
           </Button>
-          <Button onClick={handleOrderNow} disabled={sending} className="gap-2" variant="outline">
-            <ShoppingCart size={16} /> Jetzt bestellen
-          </Button>
           <Button onClick={resetAll} variant="ghost" className="gap-2 text-red-600">
             <Trash2 size={16} /> Zurücksetzen
           </Button>
@@ -1241,50 +867,30 @@ export default function Page() {
 
       {/* Live-Zusammenfassung */}
       <Section title="Live-Zusammenfassung">
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Monatlich */}
-          <div>
-            <div className="text-sm font-medium mb-2">Monatliche Positionen</div>
-            {monthlyRows.length === 0 ? (
-              <div className="text-sm opacity-70">Keine monatlichen Positionen.</div>
-            ) : (
-              <div className="space-y-2">
-                {monthlyRows.map((li) => (
-                  <div key={`m-${li.sku}`} className="flex justify-between text-sm">
-                    <div>{li.quantity}× {li.name} ({li.sku})</div>
-                    <div className="tabular-nums">{formatMoney(li.offerTotal)}</div>
-                  </div>
-                ))}
-                <div className="pt-2 border-t">
-                  <Totals title="Summe (monatlich)" rows={monthlyRows} vatRate={vatRate} />
+        {oneTimeRows.length === 0 ? (
+          <div className="text-sm opacity-70">Keine Positionen gewählt.</div>
+        ) : (
+          <div className="space-y-2">
+            {oneTimeRows.map((li) => (
+              <div key={li.sku} className="flex justify-between text-sm">
+                <div>
+                  {li.quantity}× {li.name} ({li.sku})
                 </div>
+                <div className="tabular-nums">{formatMoney(li.offerTotal)}</div>
               </div>
-            )}
+            ))}
+            <div className="pt-2 border-t">
+              <Totals
+                rows={oneTimeRows.map((r) => ({ listTotal: r.listTotal, offerTotal: r.offerTotal }))}
+                vatRate={vatRate}
+              />
+            </div>
           </div>
-          {/* Einmalig */}
-          <div>
-            <div className="text-sm font-medium mb-2">Einmalige Positionen</div>
-            {oneTimeRows.length === 0 ? (
-              <div className="text-sm opacity-70">Keine einmaligen Positionen.</div>
-            ) : (
-              <div className="space-y-2">
-                {oneTimeRows.map((li) => (
-                  <div key={`o-${li.sku}`} className="flex justify-between text-sm">
-                    <div>{li.quantity}× {li.name} ({li.sku})</div>
-                    <div className="tabular-nums">{formatMoney(li.offerTotal)}</div>
-                  </div>
-                ))}
-                <div className="pt-2 border-t">
-                  <Totals title="Summe (einmalig)" rows={oneTimeRows} vatRate={vatRate} />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </Section>
 
       <footer className="text-xs text-center opacity-70 pt-2">
-        © {new Date().getFullYear()} xVoice UC · Angebotserstellung · Alle Angaben ohne Gewähr
+        © {new Date().getFullYear()} xVoice UC · Hardware-Angebot · Alle Angaben ohne Gewähr
       </footer>
     </div>
   );
