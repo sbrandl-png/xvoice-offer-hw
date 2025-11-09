@@ -1,0 +1,12 @@
+minLicenses,maxLicenses,sku,name,price
+1,9,XVIKS10,Installations- und Konfigurationspauschale bis 10 User,299
+11,20,XVIKS20,Installations- und Konfigurationspauschale bis 20 User,399
+21,50,XVIKS50,Installations- und Konfigurationspauschale bis 50 User,899
+51,99,XVIKS99,Installations- und Konfigurationspauschale bis 99 User,1299
+100,199,XVIKS199,Installations- und Konfigurationspauschale bis 199 User,1699
+200,499,XVIKS499,Installations- und Konfigurationspauschale bis 499 User,1999
+500,999,XVIKS999,Installations- und Konfigurationspauschale bis 999 User,2999
+
+
+
+
